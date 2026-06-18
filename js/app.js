@@ -1,9 +1,20 @@
 /**
  * app.js — Lógica principal del Dashboard (Frontend-First)
  *
- * Por ahora todo funciona con mockData local.
- * Más adelante se reemplazarán estas funciones por llamadas reales a n8n/API.
+ * Usa mockData local por defecto. Si activas la API (localStorage nexus_api_enabled=true),
+ * intentará cargar datos reales desde n8n y caerá al mock si falla.
  */
+
+import {
+    API_ENABLED,
+    fetchMorningSummary,
+    fetchGarminMetrics,
+    fetchFinanceData,
+    fetchAgendaEvents,
+    fetchUciProgress,
+    fetchFitnessRoutine,
+    sendVoiceCommand,
+} from './api.js';
 
 /* ==========================================================================
    mockData — Datos de prueba para visualizar el diseño sin backend
@@ -58,8 +69,10 @@ let bodyBatteryChart = null;
 
 const ESTUDIO_STORAGE_KEY = 'nexus-estudio';
 
-/* Estado visual del micrófono (solo UI, sin envío a servidor) */
+/* Estado visual del micrófono y reconocimiento de voz */
 let isMicActive = false;
+let speechRecognition = null;
+let closeMobileMenu = () => {};
 
 /* ==========================================================================
    Utilidades
@@ -330,7 +343,13 @@ function createFinanceChartGradients(chart) {
  */
 function initFinanceChart(gastado, disponible) {
     const canvas = document.getElementById('financeChart');
+    if (!canvas) return;
+
     const ctx = canvas.getContext('2d');
+
+    if (financeChart) {
+        financeChart.destroy();
+    }
 
     financeChart = new Chart(ctx, {
         type: 'doughnut',
@@ -572,7 +591,286 @@ function renderBusquedaProfesional() {
 }
 
 /**
- * Punto central: renderiza todas las tarjetas con los datos mock.
+ * Actualiza el gráfico de finanzas si ya existe (tras registrar un gasto por voz).
+ */
+function refreshFinanceUI() {
+    const { presupuesto, gastado } = mockData.finanzas;
+    const disponible = presupuesto - gastado;
+
+    document.getElementById('gastadoValue').textContent = formatCLP(gastado);
+    document.getElementById('disponibleValue').textContent = formatCLP(disponible);
+
+    if (financeChart) {
+        financeChart.data.datasets[0].data = [gastado, disponible];
+        financeChart.update();
+    } else {
+        initFinanceChart(gastado, disponible);
+    }
+}
+
+/**
+ * Resalta brevemente una tarjeta al navegar hacia ella.
+ */
+function focusCard(cardId) {
+    const card = document.getElementById(cardId);
+    if (!card) return;
+
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.classList.add('card--focused');
+    window.setTimeout(() => card.classList.remove('card--focused'), 1400);
+}
+
+/**
+ * Marca el ítem activo en el menú lateral según la tarjeta visible.
+ */
+function setActiveNav(targetId) {
+    document.querySelectorAll('.sidebar__nav .nav-item').forEach((btn) => {
+        btn.classList.toggle('nav-item--active', btn.dataset.target === targetId);
+    });
+}
+
+/**
+ * Navega a una sección del dashboard desde el sidebar o por voz.
+ */
+function navigateToSection(cardId) {
+    if (!cardId) return;
+    focusCard(cardId);
+    setActiveNav(cardId);
+    closeMobileMenu();
+}
+
+/**
+ * Conecta los botones del sidebar con las tarjetas del grid.
+ */
+function initNavigation() {
+    document.querySelectorAll('.sidebar__nav .nav-item').forEach((btn) => {
+        btn.addEventListener('click', () => {
+            navigateToSection(btn.dataset.target);
+        });
+    });
+}
+
+/**
+ * Intenta cargar datos remotos desde n8n. Si falla, mantiene mockData.
+ */
+async function loadRemoteData() {
+    if (!API_ENABLED) return;
+
+    try {
+        const [summary, garmin, finance, agenda, estudio, fitness] = await Promise.all([
+            fetchMorningSummary(),
+            fetchGarminMetrics(),
+            fetchFinanceData(),
+            fetchAgendaEvents(),
+            fetchUciProgress(),
+            fetchFitnessRoutine(),
+        ]);
+
+        if (summary?.saludo || summary?.text) {
+            mockData.saludo = summary.saludo || summary.text;
+        }
+        if (garmin?.bodyBattery != null) {
+            mockData.garmin.bodyBattery = garmin.bodyBattery;
+        }
+        if (garmin?.sueno) {
+            mockData.garmin.sueno = garmin.sueno;
+        }
+        if (finance?.presupuesto != null && finance?.gastado != null) {
+            mockData.finanzas.presupuesto = finance.presupuesto;
+            mockData.finanzas.gastado = finance.gastado;
+        }
+        if (Array.isArray(agenda?.eventos)) {
+            mockData.agenda.eventos = agenda.eventos;
+        }
+        if (estudio?.temas?.length >= 2) {
+            mockData.estudio.temas = estudio.temas.slice(0, 2);
+        } else if (estudio?.modulo) {
+            mockData.estudio.temas[0].modulo = estudio.modulo;
+            mockData.estudio.temas[0].progreso = estudio.progreso ?? mockData.estudio.temas[0].progreso;
+        }
+        if (fitness?.terapia) {
+            mockData.habitos.terapia = fitness.terapia;
+        }
+        if (fitness?.ejercicio) {
+            mockData.habitos.ejercicio = fitness.ejercicio;
+        }
+    } catch (error) {
+        console.warn('[Dashboard] API no disponible, usando datos locales:', error.message);
+    }
+}
+
+/**
+ * Procesa comandos de voz localmente cuando no hay backend o como respuesta rápida.
+ */
+function processLocalVoiceCommand(transcript) {
+    const text = transcript.toLowerCase().trim();
+
+    const navMap = [
+        { keys: ['inicio', 'panel', 'saludo'], target: 'cardSaludo' },
+        { keys: ['recuperación', 'recuperacion', 'garmin', 'body battery', 'batería'], target: 'cardRecuperacion' },
+        { keys: ['finanza', 'presupuesto', 'gasto'], target: 'cardFinanzas' },
+        { keys: ['agenda', 'calendario', 'evento'], target: 'cardAgenda' },
+        { keys: ['estudio', 'módulo', 'modulo', 'uci'], target: 'cardEstudio' },
+        { keys: ['radar', 'postulación', 'postulacion', 'entrevista', 'trabajo'], target: 'cardRadar' },
+        { keys: ['salud', 'hábito', 'habito', 'terapia', 'ejercicio'], target: 'cardHabitos' },
+    ];
+
+    for (const item of navMap) {
+        if (item.keys.some((key) => text.includes(key))) {
+            navigateToSection(item.target);
+            return `Navegando a ${item.keys[0]}.`;
+        }
+    }
+
+    const expenseMatch = text.match(/gast[eé]\s+(\d[\d.]*)\s*(mil|lucas|pesos)?/i);
+    if (expenseMatch) {
+        let amount = Number(expenseMatch[1].replace(/\./g, ''));
+        if (expenseMatch[2] && /mil|lucas/i.test(expenseMatch[2])) {
+            amount *= 1000;
+        }
+        mockData.finanzas.gastado += amount;
+        refreshFinanceUI();
+        focusCard('cardFinanzas');
+        return `Gasto de ${formatCLP(amount)} registrado localmente.`;
+    }
+
+    if (text.includes('resumen') || text.includes('cómo estoy') || text.includes('como estoy')) {
+        navigateToSection('cardSaludo');
+        return mockData.saludo;
+    }
+
+    return 'Comando no reconocido. Prueba: "ir a finanzas", "gasté 5000" o "mostrar agenda".';
+}
+
+/**
+ * Muestra feedback del asistente de voz en el hint flotante.
+ */
+function showVoiceFeedback(message, listening = false) {
+    const hint = document.getElementById('voiceHint');
+    const hintText = document.getElementById('voiceHintText');
+
+    hintText.textContent = message;
+    hint.classList.toggle('voice-hint--visible', true);
+    hint.setAttribute('aria-hidden', 'false');
+
+    if (!listening) {
+        window.setTimeout(() => {
+            if (!isMicActive) {
+                hint.classList.remove('voice-hint--visible');
+                hint.setAttribute('aria-hidden', 'true');
+            }
+        }, 4500);
+    }
+}
+
+/**
+ * Inicia el reconocimiento de voz con Web Speech API.
+ */
+function startListening() {
+    if (!speechRecognition) return;
+
+    try {
+        speechRecognition.start();
+        showVoiceFeedback('Escuchando…', true);
+    } catch (error) {
+        console.warn('[Voz] No se pudo iniciar:', error.message);
+        showVoiceFeedback('Micrófono no disponible en este navegador.');
+        stopListening();
+    }
+}
+
+/**
+ * Detiene el reconocimiento de voz y restaura la UI.
+ */
+function stopListening() {
+    if (speechRecognition) {
+        try {
+            speechRecognition.stop();
+        } catch (error) {
+            console.warn('[Voz] Error al detener:', error.message);
+        }
+    }
+
+    isMicActive = false;
+    const fab = document.getElementById('fab-mic');
+    fab.classList.remove('fab--active');
+    fab.setAttribute('aria-pressed', 'false');
+}
+
+/**
+ * Configura Web Speech API y enlaza el botón flotante del micrófono.
+ */
+function initVoiceAssistant() {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    if (!SpeechRecognition) {
+        document.getElementById('fab-mic').addEventListener('click', () => {
+            showVoiceFeedback('Tu navegador no soporta reconocimiento de voz. Usa Chrome o Edge.');
+        });
+        return;
+    }
+
+    speechRecognition = new SpeechRecognition();
+    speechRecognition.lang = 'es-CL';
+    speechRecognition.continuous = false;
+    speechRecognition.interimResults = false;
+
+    speechRecognition.onresult = async (event) => {
+        const transcript = event.results[0][0].transcript;
+        showVoiceFeedback(`"${transcript}"`, true);
+
+        let response = processLocalVoiceCommand(transcript);
+
+        if (API_ENABLED) {
+            const remote = await sendVoiceCommand(transcript);
+            if (remote?.message) {
+                response = remote.message;
+            }
+            if (remote?.action === 'refresh_finance') {
+                await loadRemoteData();
+                initDashboard();
+            }
+        }
+
+        showVoiceFeedback(response);
+        stopListening();
+    };
+
+    speechRecognition.onerror = (event) => {
+        const messages = {
+            'no-speech': 'No detecté voz. Intenta de nuevo.',
+            'not-allowed': 'Permiso de micrófono denegado.',
+            aborted: 'Escucha cancelada.',
+        };
+        showVoiceFeedback(messages[event.error] || 'Error al escuchar.');
+        stopListening();
+    };
+
+    speechRecognition.onend = () => {
+        if (isMicActive) {
+            isMicActive = false;
+            document.getElementById('fab-mic').classList.remove('fab--active');
+            document.getElementById('fab-mic').setAttribute('aria-pressed', 'false');
+        }
+    };
+
+    document.getElementById('fab-mic').addEventListener('click', toggleMic);
+}
+
+/**
+ * Registra el Service Worker para comportamiento PWA offline básico.
+ */
+function registerServiceWorker() {
+    if (!('serviceWorker' in navigator)) return;
+
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch((error) => {
+            console.warn('[PWA] No se pudo registrar el Service Worker:', error.message);
+        });
+    });
+}
+/**
+ * Punto central: renderiza todas las tarjetas con los datos disponibles.
  */
 function initDashboard() {
     renderDate();
@@ -614,46 +912,78 @@ function initSidebar() {
     });
 
     overlay.addEventListener('click', closeMenu);
+    closeMobileMenu = closeMenu;
 }
 
 /* ==========================================================================
-   FAB — Indicador visual de micrófono (sin conexión real por ahora)
+   FAB — Conexión con webhook n8n
    ========================================================================== */
 
+const FAB_MIC_WEBHOOK_BASE =
+    'http://34.123.160.45:5678/webhook-test/d249770d-bec2-426f-98ac-35af544dfb5e';
+
 /**
- * Alterna el estado visual del botón flotante.
- * En una fase posterior aquí se conectará la Web Speech API y n8n.
+ * Resplandor magenta temporal al pulsar el micrófono (retroalimentación visual).
  */
-function toggleMic() {
-    const fab = document.getElementById('fabMic');
-    const hint = document.getElementById('voiceHint');
-    const hintText = document.getElementById('voiceHintText');
+function triggerFabMicGlow(fab) {
+    fab.classList.add('fab--syncing');
+    setTimeout(() => {
+        fab.classList.remove('fab--syncing');
+    }, 800);
+}
 
-    isMicActive = !isMicActive;
+/**
+ * Envía la señal al webhook n8n como Simple Request (GET + no-cors) para evitar CORS.
+ */
+function sendFabMicWebhook() {
+    const params = new URLSearchParams({
+        evento: 'microfono_activado',
+        usuario: 'Enfermero Profesional',
+        accion: 'solicitud_sincronizacion',
+    });
 
-    fab.classList.toggle('fab--active', isMicActive);
-    fab.setAttribute('aria-pressed', String(isMicActive));
-    hint.classList.toggle('voice-hint--visible', isMicActive);
-    hint.setAttribute('aria-hidden', String(!isMicActive));
+    const finalUrl = `${FAB_MIC_WEBHOOK_BASE}?${params.toString()}`;
 
-    hintText.textContent = isMicActive
-        ? 'Escuchando… (modo demo)'
-        : 'Micrófono desactivado';
+    return fetch(finalUrl, {
+        method: 'GET',
+        mode: 'no-cors',
+    })
+        .then(() => {
+            console.log('Señal enviada silenciosamente al backend.');
+        })
+        .catch((err) => console.error('Error enviando señal:', err));
+}
+
+/**
+ * Enlaza el botón flotante del micrófono con el servidor n8n.
+ */
+function initFabMic() {
+    const fab = document.getElementById('fab-mic');
+    if (!fab) {
+        console.warn('[FAB] No se encontró el botón #fab-mic');
+        return;
+    }
+
+    fab.addEventListener('click', () => {
+        triggerFabMicGlow(fab);
+        sendFabMicWebhook();
+    });
 }
 
 /* ==========================================================================
    Arranque
    ========================================================================== */
 
-document.addEventListener('DOMContentLoaded', () => {
-    initDashboard();
+document.addEventListener('DOMContentLoaded', async () => {
+    registerServiceWorker();
     initSidebar();
+    initNavigation();
     initEstudioEditor();
+    initFabMic();
 
-    // Desbloquea audio en navegadores que exigen interacción previa
-    document.addEventListener('click', () => initTypingAudioContext(), { once: true });
-
+    await loadRemoteData();
+    initDashboard();
     renderSaludoAnimado();
 
-    document.getElementById('fabMic').addEventListener('click', toggleMic);
+    document.addEventListener('click', () => initTypingAudioContext(), { once: true });
 });

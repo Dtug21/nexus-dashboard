@@ -309,6 +309,12 @@ ul { list-style: none; }
     box-shadow: 0 12px 40px 0 rgba(0, 0, 0, 0.7);
 }
 
+.card--focused {
+    outline: 2px solid rgba(0, 240, 255, 0.45);
+    box-shadow: 0 0 28px rgba(0, 240, 255, 0.22), 0 8px 32px 0 rgba(0, 0, 0, 0.6) !important;
+    transition: outline 0.2s ease, box-shadow 0.35s ease;
+}
+
 .card--wide { grid-column: 1 / -1; }
 
 .card__header {
@@ -1007,6 +1013,13 @@ ul { list-style: none; }
 .fab--active {
     border-color: rgba(255, 100, 150, 0.5);
     color: var(--accent-gold);
+    animation: none;
+}
+
+.fab--syncing {
+    color: #ff00ff !important;
+    border-color: rgba(255, 0, 255, 0.65) !important;
+    box-shadow: 0 0 24px #ff00ff, 0 0 48px rgba(255, 0, 255, 0.55) !important;
     animation: none;
 }
 

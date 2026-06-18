@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 192 192" role="img" aria-label="NEXUS">
+  <rect width="192" height="192" rx="44" fill="#050b14"/>
+  <circle cx="96" cy="96" r="58" fill="none" stroke="#00f0ff" stroke-width="3" opacity="0.85"/>
+  <circle cx="96" cy="96" r="36" fill="none" stroke="#ff6496" stroke-width="2" opacity="0.5"/>
+  <text x="96" y="108" text-anchor="middle" fill="#00f0ff" font-family="system-ui,sans-serif" font-size="52" font-weight="700">N</text>
+</svg>

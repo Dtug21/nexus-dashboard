@@ -1,0 +1,19 @@
+{
+  "name": "NEXUS Dashboard",
+  "short_name": "NEXUS",
+  "description": "Dashboard personal holográfico con glassmorphism",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#050b14",
+  "theme_color": "#050b14",
+  "orientation": "any",
+  "lang": "es",
+  "icons": [
+    {
+      "src": "assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

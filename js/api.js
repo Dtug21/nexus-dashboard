@@ -6,8 +6,15 @@
  * sin tocar la interfaz (app.js).
  */
 
-// URL base del servidor n8n (reemplazar por tu dominio real en producción)
-const N8N_BASE_URL = 'https://mi-servidor.com/webhook';
+// URL base del servidor n8n (configurable desde la consola del navegador)
+const N8N_BASE_URL = localStorage.getItem('nexus_api_base') || 'http://34.123.160.45:5678/webhook';
+
+/** Webhook principal del micrófono / sincronización n8n */
+const N8N_MIC_WEBHOOK =
+    'http://34.123.160.45:5678/webhook-test/d249770d-bec2-426f-98ac-35af544dfb5e';
+
+/** Activa las peticiones reales cuando tu servidor n8n esté listo. */
+export const API_ENABLED = localStorage.getItem('nexus_api_enabled') === 'true';
 
 /**
  * Endpoints de cada integración del ecosistema.
@@ -20,7 +27,7 @@ const ENDPOINTS = {
     agendaEvents: `${N8N_BASE_URL}/agenda`,
     uciProgress: `${N8N_BASE_URL}/uci`,
     fitnessRoutine: `${N8N_BASE_URL}/fitness`,
-    voiceCommand: `${N8N_BASE_URL}/voz`,
+    voiceCommand: N8N_MIC_WEBHOOK,
 };
 
 /**

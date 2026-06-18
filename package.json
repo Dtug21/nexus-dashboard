@@ -1,0 +1,10 @@
+{
+  "name": "nexus-dashboard",
+  "version": "1.0.0",
+  "description": "Dashboard personal NEXUS — PWA frontend-first",
+  "private": true,
+  "scripts": {
+    "start": "npx --yes serve . -p 3000",
+    "dev": "npm run start"
+  }
+}
