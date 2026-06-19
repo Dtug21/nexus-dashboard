@@ -13,6 +13,7 @@ import {
     fetchAgendaEvents,
     fetchUciProgress,
     fetchFitnessRoutine,
+    fetchCorreos,
     sendVoiceCommand,
 } from './api.js';
 
@@ -165,22 +166,7 @@ function playSyntheticKeystroke() {
  * (también puedes usar beep.mp3 renombrado). Si no existe, usa sonido sintético.
  */
 function playKeystrokeSound() {
-    try {
-        if (!keystrokeSample) {
-            keystrokeSample = new Audio('assets/keystroke.mp3');
-            keystrokeSample.load();
-        }
-
-        const click = keystrokeSample.cloneNode();
-        click.volume = 0.12 + Math.random() * 0.1;
-        click.playbackRate = 0.9 + Math.random() * 0.25;
-
-        click.play().catch(() => {
-            playSyntheticKeystroke();
-        });
-    } catch (error) {
-        playSyntheticKeystroke();
-    }
+    playSyntheticKeystroke();
 }
 
 /**
@@ -399,6 +385,10 @@ function renderAgenda() {
     const { eventos } = mockData.agenda;
 
     const eventList = document.getElementById('eventList');
+    if (!eventos || eventos.length === 0) {
+        eventList.innerHTML = '<li class="event-item"><div><p class="event-item__title" style="opacity:0.5">Sin eventos esta semana</p></div></li>';
+        return;
+    }
     eventList.innerHTML = eventos
         .map(
             (evento) => `
@@ -653,17 +643,38 @@ function initNavigation() {
 /**
  * Intenta cargar datos remotos desde n8n. Si falla, mantiene mockData.
  */
+function renderCorreos(data) {
+    const noLeidos = data?.noLeidos ?? data?.unread ?? 0;
+    const mensajes = Array.isArray(data?.mensajes) ? data.mensajes : [];
+
+    const countEl = document.getElementById('correosNoLeidos');
+    const listEl = document.getElementById('correosList');
+    if (countEl) countEl.textContent = noLeidos;
+    if (listEl) {
+        if (mensajes.length === 0) {
+            listEl.innerHTML = '<li style="opacity:0.5;padding:4px 0;font-size:0.85rem">Sin correos recientes</li>';
+        } else {
+            listEl.innerHTML = mensajes.slice(0, 5).map(m => `
+                <li style="padding:4px 0;border-bottom:1px solid rgba(255,255,255,0.07);font-size:0.82rem">
+                    <span style="opacity:0.6">${m.remitente || ''}</span><br>
+                    <span>${m.asunto || ''}</span>
+                </li>`).join('');
+        }
+    }
+}
+
 async function loadRemoteData() {
     if (!API_ENABLED) return;
 
     try {
-        const [summary, garmin, finance, agenda, estudio, fitness] = await Promise.all([
+        const [summary, garmin, finance, agenda, estudio, fitness, correos] = await Promise.all([
             fetchMorningSummary(),
             fetchGarminMetrics(),
             fetchFinanceData(),
             fetchAgendaEvents(),
             fetchUciProgress(),
             fetchFitnessRoutine(),
+            fetchCorreos(),
         ]);
 
         if (summary?.saludo || summary?.text) {
@@ -679,8 +690,21 @@ async function loadRemoteData() {
             mockData.finanzas.presupuesto = finance.presupuesto;
             mockData.finanzas.gastado = finance.gastado;
         }
-        if (Array.isArray(agenda?.eventos)) {
-            mockData.agenda.eventos = agenda.eventos;
+        // Si la API respondió (aunque sea null/vacío), reemplaza los mock
+        if (agenda !== undefined) {
+            if (Array.isArray(agenda)) {
+                mockData.agenda.eventos = agenda.map(e => ({
+                    titulo: e.summary || 'Sin título',
+                    hora: e.start?.dateTime
+                        ? new Date(e.start.dateTime).toLocaleTimeString('es-CL', { hour: '2-digit', minute: '2-digit' })
+                        : e.start?.date || '',
+                    destacado: false,
+                }));
+            } else if (Array.isArray(agenda?.eventos)) {
+                mockData.agenda.eventos = agenda.eventos;
+            } else {
+                mockData.agenda.eventos = [];
+            }
         }
         if (estudio?.temas?.length >= 2) {
             mockData.estudio.temas = estudio.temas.slice(0, 2);
@@ -693,6 +717,9 @@ async function loadRemoteData() {
         }
         if (fitness?.ejercicio) {
             mockData.habitos.ejercicio = fitness.ejercicio;
+        }
+        if (correos != null) {
+            renderCorreos(correos);
         }
     } catch (error) {
         console.warn('[Dashboard] API no disponible, usando datos locales:', error.message);

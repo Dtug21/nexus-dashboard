@@ -25,8 +25,9 @@ const ENDPOINTS = {
     garminMetrics: `${N8N_BASE_URL}/garmin`,
     financeData: `${N8N_BASE_URL}/finanzas`,
     agendaEvents: `${N8N_BASE_URL}/agenda`,
-    uciProgress: `${N8N_BASE_URL}/uci`,
+    uciProgress: `${N8N_BASE_URL}/estudio`,
     fitnessRoutine: `${N8N_BASE_URL}/fitness`,
+    correos: `${N8N_BASE_URL}/correos`,
     voiceCommand: N8N_MIC_WEBHOOK,
 };
 
@@ -130,8 +131,14 @@ export async function fetchFinanceData() {
  */
 export async function fetchAgendaEvents() {
     try {
-        const data = await getFromWebhook(ENDPOINTS.agendaEvents);
-        return data;
+        const response = await fetch(ENDPOINTS.agendaEvents, {
+            method: 'GET',
+            headers: { Accept: 'application/json' },
+        });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const text = await response.text();
+        if (!text || text.trim() === '') return [];
+        return JSON.parse(text);
     } catch (error) {
         console.error('[API] Error al obtener agenda:', error.message);
         return null;
@@ -158,6 +165,16 @@ export async function fetchUciProgress() {
  *
  * @returns {Promise<object|null>} Rutina fitness o null si falla
  */
+export async function fetchCorreos() {
+    try {
+        const data = await getFromWebhook(ENDPOINTS.correos);
+        return data;
+    } catch (error) {
+        console.error('[API] Error al obtener correos:', error.message);
+        return null;
+    }
+}
+
 export async function fetchFitnessRoutine() {
     try {
         const data = await getFromWebhook(ENDPOINTS.fitnessRoutine);
